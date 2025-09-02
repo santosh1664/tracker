@@ -1,14 +1,412 @@
+```html
 <!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Job Application Tracker</title>
-    <meta name="description" content="Track job applications with an applied/not-applied checklist and counters." />
-    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🗂️</text></svg>">
-  </head>
-  <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
-  </body>
+<head>
+  <meta charset="utf-8" />
+  <title>Job Application Tracker</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root { --bg:#f6f7f9; --card:#fff; --text:#1f2937; --muted:#6b7280; --border:#e5e7eb; }
+    * { box-sizing: border-box; font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; }
+    body { margin:0; background:var(--bg); color:var(--text); }
+    .wrap { max-width: 1100px; margin: 0 auto; padding: 24px; }
+    .row { display:flex; gap:12px; flex-wrap:wrap; }
+    .between { justify-content: space-between; align-items:center; }
+    .title { font-size: 22px; font-weight: 700; }
+    .card { background:var(--card); border:1px solid var(--border); border-radius:16px; box-shadow: 0 1px 8px rgba(0,0,0,.04); }
+    .pad { padding:16px; }
+    .kpi { flex: 1 1 220px; }
+    .kpi .label { font-size:12px; color:var(--muted); }
+    .kpi .value { font-size:28px; font-weight:700; margin-top:4px; }
+    input, textarea, button, label.file { border:1px solid var(--border); background:#fff; border-radius:12px; padding:10px 12px; font-size:14px; }
+    input, textarea { width:100%; }
+    textarea { min-height: 70px; }
+    button { cursor:pointer; }
+    button.primary { background:#111827; color:#fff; border-color:#111827; }
+    button.ghost { background:#fff; }
+    table { width:100%; border-collapse: collapse; }
+    th, td { padding:12px; border-top:1px solid var(--border); vertical-align: top; text-align:left; }
+    thead th { background:#f3f4f6; color:#374151; border-top:none; }
+    .small { font-size:12px; color:var(--muted); }
+    .pill { display:inline-flex; align-items:center; gap:8px; padding:8px 10px; border:1px dashed var(--border); border-radius:12px; }
+    .actions { display:flex; gap:8px; flex-wrap:wrap; }
+    .flex-1 { flex:1; }
+    .hidden { display:none; }
+    a.link { color:#2563eb; text-decoration: underline; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <!-- Header -->
+    <div class="row between">
+      <div class="title">Job Application Tracker</div>
+      <div class="actions">
+        <button id="exportBtn" class="ghost">Export CSV</button>
+        <button id="clearAllBtn" class="ghost">Clear All</button>
+      </div>
+    </div>
+
+    <!-- KPIs -->
+    <div class="row" style="margin-top:16px">
+      <div class="card kpi"><div class="pad"><div class="label">Total Jobs</div><div id="kpi-total" class="value">0</div></div></div>
+      <div class="card kpi"><div class="pad"><div class="label">Applied</div><div id="kpi-applied" class="value">0</div></div></div>
+      <div class="card kpi"><div class="pad"><div class="label">Not Yet Applied</div><div id="kpi-unapplied" class="value">0</div></div></div>
+    </div>
+
+    <!-- Add form -->
+    <div class="card" style="margin-top:16px">
+      <div class="pad">
+        <div class="row">
+          <div class="flex-1"><input id="f-company" placeholder="Company" /></div>
+          <div class="flex-1"><input id="f-role" placeholder="Role / Title" /></div>
+          <div class="flex-1"><input id="f-link" placeholder="Link (optional)" /></div>
+          <label class="pill"><input id="f-applied" type="checkbox" /> Applied</label>
+          <button id="addBtn" class="primary">Add</button>
+        </div>
+        <div style="margin-top:10px"><textarea id="f-notes" placeholder="Notes (optional)"></textarea></div>
+      </div>
+    </div>
+
+    <!-- Toolbar -->
+    <div class="row" style="margin-top:12px">
+      <div class="flex-1"><input id="search" placeholder="Search company, role, notes…" /></div>
+      <button id="toggleUnappliedBtn" class="ghost">Only Not Applied</button>
+      <label class="pill" id="dropZone">
+        <span>Drag & drop CSV to import</span>
+        <input id="fileInput" class="hidden" type="file" accept=".csv" />
+      </label>
+    </div>
+
+    <!-- List -->
+    <div class="card" style="margin-top:12px">
+      <div class="pad" style="padding:0">
+        <div style="overflow-x:auto">
+          <table id="table">
+            <thead>
+              <tr>
+                <th>Applied</th>
+                <th>Company</th>
+                <th>Role</th>
+                <th>Date</th>
+                <th>Link</th>
+                <th>Notes</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="tbody">
+              <tr><td colspan="7" class="small" style="text-align:center; padding:24px">Loading…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <div class="small" style="text-align:center; margin:24px 0 8px">Data is stored in your Google Sheet.</div>
+  </div>
+
+  <script>
+    // === YOUR GOOGLE APPS SCRIPT WEB APP /exec URL ===
+    const API_URL = "https://script.google.com/macros/s/AKfycbyKZSMCpYWEnbb38q0mey4ERttBHCxvlSm74a1O-oDR9_9YWjibSeuFt568dVvdq3vxLQ/exec";
+    const uid = () => Math.random().toString(36).slice(2,10);
+
+    /** @type {{id:string,company:string,role:string,link?:string,notes?:string,applied:boolean,date?:string}[]} */
+    let jobs = [];
+
+    // UI refs
+    const kTotal = document.getElementById('kpi-total');
+    const kApplied = document.getElementById('kpi-applied');
+    const kUnapplied = document.getElementById('kpi-unapplied');
+    const tbody = document.getElementById('tbody');
+    const search = document.getElementById('search');
+    const toggleUnappliedBtn = document.getElementById('toggleUnappliedBtn');
+
+    const fCompany = document.getElementById('f-company');
+    const fRole = document.getElementById('f-role');
+    const fLink = document.getElementById('f-link');
+    const fApplied = document.getElementById('f-applied');
+    const fNotes = document.getElementById('f-notes');
+
+    let showOnlyUnapplied = false;
+
+    // Fetch helpers (return parsed JSON or throw raw text for debugging)
+    async function apiGet() {
+      const res = await fetch(API_URL, { method: "GET" });
+      const text = await res.text();
+      try { return JSON.parse(text); } catch { throw new Error(text || "GET failed"); }
+    }
+    async function apiPost(payload) {
+      const res = await fetch(API_URL, {
+        method: "POST",
+        headers: {"Content-Type":"application/json"},
+        body: JSON.stringify(payload)
+      });
+      const text = await res.text();
+      try { return JSON.parse(text); } catch { throw new Error(text || "POST failed"); }
+    }
+
+    // Load from Google Sheets
+    init();
+    async function init(){
+      try {
+        jobs = await apiGet();
+      } catch (e) {
+        console.error(e);
+        jobs = [];
+        alert("Failed to load from Google Sheets. Check Web App deployment access and script code.");
+      }
+      render();
+    }
+
+    function truthy(v){ return v === true || String(v).toLowerCase() === "true" || String(v).toLowerCase().startsWith("y"); }
+
+    function filteredJobs(){
+      const q = (search.value || "").toLowerCase();
+      return jobs.filter(j => {
+        const match = (j.company + " " + j.role + " " + (j.notes||"")).toLowerCase().includes(q);
+        const pass = showOnlyUnapplied ? !truthy(j.applied) : true;
+        return match && pass;
+      });
+    }
+
+    function render(){
+      const total = jobs.length;
+      const appliedCount = jobs.filter(j => truthy(j.applied)).length;
+      const unappliedCount = total - appliedCount;
+
+      kTotal.textContent = total;
+      kApplied.textContent = appliedCount;
+      kUnapplied.textContent = unappliedCount;
+
+      const list = filteredJobs();
+
+      tbody.innerHTML = "";
+      if(list.length === 0){
+        const tr = document.createElement('tr');
+        const td = document.createElement('td');
+        td.colSpan = 7;
+        td.className = "small";
+        td.style.textAlign = "center";
+        td.style.padding = "24px";
+        td.textContent = "No jobs found.";
+        tr.appendChild(td);
+        tbody.appendChild(tr);
+        return;
+      }
+
+      for(const j of list){
+        const tr = document.createElement('tr');
+
+        const tdA = document.createElement('td');
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.checked = truthy(j.applied);
+        cb.addEventListener('change', () => toggleApplied(j.id, cb.checked));
+        tdA.appendChild(cb);
+        tr.appendChild(tdA);
+
+        const tdC = document.createElement('td'); tdC.textContent = j.company; tdC.style.fontWeight='600'; tr.appendChild(tdC);
+        const tdR = document.createElement('td'); tdR.textContent = j.role; tr.appendChild(tdR);
+        const tdD = document.createElement('td'); tdD.textContent = j.date ? new Date(j.date).toLocaleDateString() : "—"; tr.appendChild(tdD);
+
+        const tdL = document.createElement('td');
+        if(j.link){
+          const a = document.createElement('a'); a.href = j.link; a.target = "_blank"; a.rel = "noreferrer"; a.textContent = "Open"; a.className="link";
+          tdL.appendChild(a);
+        } else tdL.textContent = "—";
+        tr.appendChild(tdL);
+
+        const tdN = document.createElement('td'); tdN.textContent = j.notes || "—"; tr.appendChild(tdN);
+
+        const tdAct = document.createElement('td');
+        const del = document.createElement('button'); del.textContent = "Delete"; del.className="ghost";
+        del.addEventListener('click', () => removeJob(j.id));
+        tdAct.appendChild(del);
+        tr.appendChild(tdAct);
+
+        tbody.appendChild(tr);
+      }
+    }
+
+    // Add
+    document.getElementById('addBtn').addEventListener('click', addJob);
+    async function addJob(){
+      const company = fCompany.value.trim();
+      const role = fRole.value.trim();
+      if(!company || !role) return;
+
+      const job = {
+        action: "add",
+        id: uid(),
+        company,
+        role,
+        link: fLink.value.trim() || "",
+        notes: fNotes.value.trim() || "",
+        applied: !!fApplied.checked,
+        date: new Date().toISOString()
+      };
+      try{
+        const r = await apiPost(job);
+        if (r.status !== 'OK') throw new Error(r.message || 'Add failed');
+        jobs.unshift(job);
+        clearForm();
+        render();
+      } catch(e){
+        console.error(e);
+        alert("Failed to add. " + e.message);
+      }
+    }
+
+    function clearForm(){
+      fCompany.value = "";
+      fRole.value = "";
+      fLink.value = "";
+      fNotes.value = "";
+      fApplied.checked = false;
+    }
+
+    // Toggle applied (update)
+    async function toggleApplied(id, applied){
+      try{
+        const r = await apiPost({ action: "update", id, applied });
+        if (r.status !== 'OK') throw new Error(r.message || 'Update failed');
+        jobs = jobs.map(j => j.id === id ? { ...j, applied } : j);
+        render();
+      } catch(e){
+        console.error(e);
+        alert("Failed to update. " + e.message);
+      }
+    }
+
+    // Delete single
+    async function removeJob(id){
+      if(!confirm("Delete this job?")) return;
+      try{
+        const r = await apiPost({ action: "delete", id });
+        if (r.status !== 'OK') throw new Error(r.message || 'Delete failed');
+        jobs = jobs.filter(j => j.id !== id);
+        render();
+      } catch(e){
+        console.error(e);
+        alert("Failed to delete. " + e.message);
+      }
+    }
+
+    // Clear all (iterate deletes)
+    document.getElementById('clearAllBtn').addEventListener('click', clearAll);
+    async function clearAll(){
+      if(!jobs.length) return;
+      if(!confirm(`Delete ALL ${jobs.length} jobs from the sheet? This cannot be undone.`)) return;
+      const ids = jobs.map(j => j.id);
+      for (const id of ids) {
+        try {
+          const r = await apiPost({ action: "delete", id });
+          if (r.status !== 'OK') console.warn('Delete failed for', id, r);
+        } catch (e) {
+          console.error('Delete error for', id, e);
+        }
+      }
+      // Reload from server to ensure fresh state
+      await init();
+    }
+
+    // Search + filter
+    document.getElementById('toggleUnappliedBtn').addEventListener('click', () => {
+      showOnlyUnapplied = !showOnlyUnapplied;
+      document.getElementById('toggleUnappliedBtn').textContent = showOnlyUnapplied ? "Show All" : "Only Not Applied";
+      render();
+    });
+    document.getElementById('search').addEventListener('input', render);
+
+    // CSV export/import
+    document.getElementById('exportBtn').addEventListener('click', exportCSV);
+    function escapeCsv(v){
+      v = v ?? "";
+      return /[\",\n]/.test(v) ? '"' + String(v).replaceAll('"','""') + '"' : String(v);
+    }
+    function exportCSV(){
+      const header = ["ID","Company","Role","Link","Applied","Date","Notes"];
+      const lines = jobs.map(j => [
+        escapeCsv(j.id),
+        escapeCsv(j.company),
+        escapeCsv(j.role),
+        escapeCsv(j.link || ""),
+        truthy(j.applied) ? "Yes":"No",
+        j.date ? new Date(j.date).toLocaleDateString() : "",
+        escapeCsv(j.notes || "")
+      ].join(","));
+      const csv = [header.join(","), ...lines].join("\n");
+      const blob = new Blob([csv], {type:"text/csv;charset=utf-8;"});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a'); a.href = url; a.download = `job-tracker-${new Date().toISOString().slice(0,10)}.csv`;
+      a.click(); URL.revokeObjectURL(url);
+    }
+
+    // CSV import (adds rows to sheet)
+    const dropZone = document.getElementById('dropZone');
+    const fileInput = document.getElementById('fileInput');
+    dropZone.addEventListener('click', () => fileInput.click());
+    fileInput.addEventListener('change', e => {
+      const file = e.target.files?.[0]; if(!file) return;
+      const reader = new FileReader();
+      reader.onload = () => importCSVText(String(reader.result||""));
+      reader.readAsText(file);
+      fileInput.value = "";
+    });
+    ;['dragover','dragenter'].forEach(evt => dropZone.addEventListener(evt, e => { e.preventDefault(); dropZone.style.opacity='.8'; }));
+    ;['dragleave','dragend','drop'].forEach(evt => dropZone.addEventListener(evt, e => { e.preventDefault(); dropZone.style.opacity='1'; }));
+    dropZone.addEventListener('drop', e => {
+      const file = e.dataTransfer.files?.[0]; if(!file) return;
+      const reader = new FileReader();
+      reader.onload = () => importCSVText(String(reader.result||""));
+      reader.readAsText(file);
+    });
+
+    async function importCSVText(text){
+      const rows = text.split(/\r?\n/).filter(Boolean);
+      const header = (rows.shift() || "").toLowerCase().split(",");
+      const idx = {
+        company: header.findIndex(h => h.includes("company")),
+        role: header.findIndex(h => h.includes("role")),
+        link: header.findIndex(h => h.includes("link")),
+        applied: header.findIndex(h => h.includes("applied")),
+        date: header.findIndex(h => h.includes("date")),
+        notes: header.findIndex(h => h.includes("note")),
+      };
+      const additions = [];
+      for (const r of rows) {
+        const cols = splitCsvRow(r);
+        const job = {
+          action: "add",
+          id: uid(),
+          company: cols[idx.company] || "",
+          role: cols[idx.role] || "",
+          link: cols[idx.link] || "",
+          applied: ((cols[idx.applied]||"").toLowerCase().startsWith("y")) || ((cols[idx.applied]||"").toLowerCase()==="true"),
+          date: cols[idx.date] ? new Date(cols[idx.date]).toISOString() : new Date().toISOString(),
+          notes: cols[idx.notes] || ""
+        };
+        if (job.company && job.role) {
+          try { const r = await apiPost(job); if (r.status !== 'OK') console.warn('Import add failed:', r); }
+          catch(e){ console.error("Import add failed:", e); }
+          additions.push(job);
+        }
+      }
+      jobs = [...additions, ...jobs];
+      render();
+    }
+
+    function splitCsvRow(row){
+      const out=[]; let cur=""; let q=false;
+      for(let i=0;i<row.length;i++){
+        const ch=row[i];
+        if(ch==='\"'){ if(q && row[i+1]==='\"'){ cur+='\"'; i++; } else { q=!q; } }
+        else if(ch===',' && !q){ out.push(cur); cur=""; }
+        else cur+=ch;
+      }
+      out.push(cur);
+      return out.map(s=>s.trim());
+    }
+  </script>
+</body>
 </html>
+```
